@@ -4,7 +4,8 @@ WHERE table_schema = 'public';
 
 -- Tabela de Clientes
 CREATE TABLE customers (
-    customer_id INT PRIMARY KEY,
+	id SERIAL PRIMARY KEY,
+    customer_id INT,
     city VARCHAR(255)
 );
 
@@ -15,3 +16,11 @@ CREATE TABLE products (
     product VARCHAR(255),
     unit_price NUMERIC(10, 2)
 );
+
+DROP TABLE customers;
+
+SELECT * FROM customers;
+
+-- ON CONFLICT (customer_id) 
+--             DO UPDATE SET
+--                 city = EXCLUDED.city
