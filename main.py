@@ -4,15 +4,16 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
 # %%
-coffe_sales_df = pd.read_csv("data/coffe_sales.csv")
+coffee_sales_df = pd.read_csv("data/coffe_sales.csv")
+print(coffee_sales_df)
 
 # %%
-coffe_sales_df["Date"] = pd.to_datetime(coffe_sales_df["Date"])
-coffe_sales_df["Date"] = coffe_sales_df["Date"].dt.strftime("%d/%m/%Y")
+coffee_sales_df["Date"] = pd.to_datetime(coffee_sales_df["Date"])
+coffee_sales_df["Date"] = coffee_sales_df["Date"].dt.strftime("%d/%m/%Y")
 
 # %%
-coffe_sales_df[["Unit Price", "Sales Amount", "Discount_Amount", "Final Sales"]] = (
-    coffe_sales_df[
+coffee_sales_df[["Unit Price", "Sales Amount", "Discount_Amount", "Final Sales"]] = (
+    coffee_sales_df[
         ["Unit Price", "Sales Amount", "Discount_Amount", "Final Sales"]
     ].astype(float)
 )
@@ -23,7 +24,7 @@ novos_nomes = [
     "customer_id",
     "city",
     "category",
-    "product_name",
+    "product",
     "unit_price",
     "quantity",
     "sales_amount",
@@ -32,130 +33,90 @@ novos_nomes = [
     "final_sales",
 ]
 
+# %%
+coffee_sales_df.columns = novos_nomes
+
 
 # %%
-coffe_sales_df.columns = novos_nomes
-customers_df = coffe_sales_df[["customer_id", "city"]]
+coffee_sales_df["used_discount"].astype(bool)
 
-products_df = coffe_sales_df[["category", "product_name", "unit_price"]]
-
-print(products_df)
+print(coffee_sales_df.info())
 
 # %%
-# Criar a conexão com o banco de dados PostgreSQL
 engine = create_engine("postgresql://postgres:1234@localhost:5432/coffe_sales_db")
 
 
 # %%
 try:
-    # Usar uma única conexão para toda a operação
     with engine.connect() as connection:
-        # Iniciar transação explícita
+
         trans = connection.begin()
 
-        temp_table_name = "temp_customers"
+        TEMP_TABLE = "temp_coffee_beans_sales"
 
-        # 1. Criar tabela temporária usando DDL explícito (somente 'city')
-        create_temp_table = text(
+        CREATE_TEMP_TB = text(
             f"""
-            CREATE TEMPORARY TABLE {temp_table_name} (
-                city VARCHAR(20)
+            CREATE TEMPORARY TABLE {TEMP_TABLE} (
+                date DATE,
+                customer_id INT,
+                city VARCHAR(20),
+                category VARCHAR(25),
+                product VARCHAR(25),    
+                unit_price NUMERIC(10,2),
+                quantity INT,
+                sales_amount NUMERIC(10,2),  
+                used_discount BOOLEAN,  
+                discount_amount NUMERIC(10,2),  
+                final_sales NUMERIC(10,2)
             )
         """
         )
-        connection.execute(create_temp_table)
+        connection.execute(CREATE_TEMP_TB)
 
-        # 2. Inserir dados do DataFrame
-        if not customers_df.empty:
-            # Converter para lista de dicionários
-            data = customers_df[["city"]].to_dict(orient="records")
+        if not coffee_sales_df.empty:
 
-            # Inserção em lote
+            data = coffee_sales_df[
+                [
+                    "date",
+                    "customer_id",
+                    "city",
+                    "category",
+                    "product",
+                    "unit_price",
+                    "quantity",
+                    "sales_amount",
+                    "used_discount",
+                    "discount_amount",
+                    "final_sales",
+                ]
+            ].to_dict(orient="records")
+
             connection.execute(
                 text(
                     f"""
-                    INSERT INTO {temp_table_name} (city)
-                    VALUES (:city)
+                    INSERT INTO {TEMP_TABLE} (date, customer_id, city, category, product, unit_price, quantity, sales_amount, used_discount, discount_amount, final_sales)
+                    VALUES (:date, :customer_id, :city, :category, :product, :unit_price, :quantity, :sales_amount, :used_discount, :discount_amount, :final_sales)
                 """
                 ),
                 data,
             )
 
-        # 3. Fazer upsert na tabela principal (somente 'city')
         upsert_query = text(
             f"""
-            INSERT INTO customers (city)
-            SELECT city FROM {temp_table_name}
+            INSERT INTO coffee_beans_sales (date, customer_id, city, category, product, unit_price, quantity, sales_amount, used_discount, discount_amount, final_sales)
+            SELECT date, customer_id, city, category, product, unit_price, quantity, sales_amount, used_discount, discount_amount, final_sales FROM {TEMP_TABLE}
         """
         )
         connection.execute(upsert_query)
 
-        # Commit final
         trans.commit()
         print("Operação concluída com sucesso!")
 
 except SQLAlchemyError as e:
     print(f"Erro na operação: {e}")
-    # O rollback é automático com o context manager 'with'
 
 finally:
     engine.dispose()
 
 # %%
-try:
-    # Usar uma única conexão para toda a operação
-    with engine.connect() as connection:
-        # Iniciar transação explícita
-        trans = connection.begin()
-
-        temp_table_name = "temp_products"
-
-        # 1. Criar tabela temporária usando (somente 'category', 'product_name', 'unit_price')
-        create_temp_table = text(
-            f"""
-            CREATE TEMPORARY TABLE {temp_table_name} (
-                category VARCHAR(25),
-                product_name VARCHAR(25),
-                unit_price NUMERIC(10,2)
-            )
-        """
-        )
-        connection.execute(create_temp_table)
-
-        # 2. Inserir dados do DataFrame
-        if not products_df.empty:
-            # Converter para lista de dicionários
-            data = products_df[["category", "product_name", "unit_price"]].to_dict(
-                orient="records"
-            )
-
-            # Inserção em lote
-            connection.execute(
-                text(
-                    f"""
-                    INSERT INTO {temp_table_name} (category, product_name, unit_price)
-                    VALUES (:category, :product_name, :unit_price)
-                """
-                ),
-                data,
-            )
-
-        # 3. Fazer upsert na tabela principal (somente 'category', 'product_name', 'unit_price')
-        upsert_query = text(
-            f"""
-            INSERT INTO products (category, product_name, unit_price)
-            SELECT category, product_name, unit_price FROM {temp_table_name}
-        """
-        )
-        connection.execute(upsert_query)
-
-        # Commit final
-        trans.commit()
-        print("Operação concluída com sucesso para a tabela 'products'!")
-
-except SQLAlchemyError as e:
-    print(f"Erro na operação: {e}")
-    # O rollback é automático com o context manager 'with'
-
-finally:
-    engine.dispose()
+print(coffee_sales_df)
