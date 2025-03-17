@@ -1,122 +1,76 @@
-# %%
-import pandas as pd
-from sqlalchemy import create_engine, text
+"""
+Script para processamento e inserção de dados de vendas de café no banco de dados PostgreSQL.
+
+Fluxo:
+1. Carrega e processa os dados do arquivo CSV.
+2. Conecta ao banco de dados.
+3. Cria uma tabela temporária para armazenar os dados.
+4. Insere os dados na tabela temporária.
+5. Move os dados para a tabela final.
+6. Fecha a conexão com o banco.
+"""
+
 from sqlalchemy.exc import SQLAlchemyError
-
-# %%
-coffee_sales_df = pd.read_csv("data/coffe_sales.csv")
-print(coffee_sales_df)
-
-# %%
-coffee_sales_df["Date"] = pd.to_datetime(coffee_sales_df["Date"])
-coffee_sales_df["Date"] = coffee_sales_df["Date"].dt.strftime("%d/%m/%Y")
-
-# %%
-coffee_sales_df[["Unit Price", "Sales Amount", "Discount_Amount", "Final Sales"]] = (
-    coffee_sales_df[
-        ["Unit Price", "Sales Amount", "Discount_Amount", "Final Sales"]
-    ].astype(float)
+from modules.data_processing import load_data
+from modules.database import (
+    insert_data,
+    upsert_data,
+    create_engine_connection,
+    create_temp_table,
 )
 
-# %%
-novos_nomes = [
-    "date",
-    "customer_id",
-    "city",
-    "category",
-    "product",
-    "unit_price",
-    "quantity",
-    "sales_amount",
-    "used_discount",
-    "discount_amount",
-    "final_sales",
-]
 
-# %%
-coffee_sales_df.columns = novos_nomes
+def main():
+    """
+    Função principal que executa o carregamento, processamento e inserção no banco.
+    """
+
+    # Caminho do arquivo de dados
+    file_path = "data/coffe_sales.csv"
+
+    # Nome da tabela temporária
+    temp_table_name = "temp_coffee_beans_sales"
+
+    # Carrega e processa os dados
+    df = load_data(file_path)
+
+    # Cria a conexão com o banco
+    engine = create_engine_connection()
+
+    try:
+        with engine.connect() as connection:
+
+            # Inicia a transação
+            trans = connection.begin()
+
+            # Cria a tabela temporária
+            create_temp_table(connection, temp_table_name)
+
+            # Insere os dados na tabela temporária
+            insert_data(connection, df, temp_table_name)
+
+            # Faz o upsert dos dados na tabela final
+            upsert_data(connection, temp_table_name)
+
+            # Confirma a transação
+            trans.commit()
+
+            print("Operação concluída com sucesso!")
+
+    except SQLAlchemyError as e:
+
+        # Exibe erro em caso de falha na operação
+        print(f"Erro na operação: {e}")
+
+    finally:
+        # Fecha a conexão com o banco
+        engine.dispose()
+
+        # Exibe informações sobre o DataFrame processado
+        print(df.info())
 
 
-# %%
-coffee_sales_df["used_discount"].astype(bool)
+if __name__ == "__main__":
 
-print(coffee_sales_df.info())
-
-# %%
-engine = create_engine("postgresql://postgres:1234@localhost:5432/coffe_sales_db")
-
-
-# %%
-try:
-    with engine.connect() as connection:
-
-        trans = connection.begin()
-
-        TEMP_TABLE = "temp_coffee_beans_sales"
-
-        CREATE_TEMP_TB = text(
-            f"""
-            CREATE TEMPORARY TABLE {TEMP_TABLE} (
-                date DATE,
-                customer_id INT,
-                city VARCHAR(20),
-                category VARCHAR(25),
-                product VARCHAR(25),    
-                unit_price NUMERIC(10,2),
-                quantity INT,
-                sales_amount NUMERIC(10,2),  
-                used_discount BOOLEAN,  
-                discount_amount NUMERIC(10,2),  
-                final_sales NUMERIC(10,2)
-            )
-        """
-        )
-        connection.execute(CREATE_TEMP_TB)
-
-        if not coffee_sales_df.empty:
-
-            data = coffee_sales_df[
-                [
-                    "date",
-                    "customer_id",
-                    "city",
-                    "category",
-                    "product",
-                    "unit_price",
-                    "quantity",
-                    "sales_amount",
-                    "used_discount",
-                    "discount_amount",
-                    "final_sales",
-                ]
-            ].to_dict(orient="records")
-
-            connection.execute(
-                text(
-                    f"""
-                    INSERT INTO {TEMP_TABLE} (date, customer_id, city, category, product, unit_price, quantity, sales_amount, used_discount, discount_amount, final_sales)
-                    VALUES (:date, :customer_id, :city, :category, :product, :unit_price, :quantity, :sales_amount, :used_discount, :discount_amount, :final_sales)
-                """
-                ),
-                data,
-            )
-
-        upsert_query = text(
-            f"""
-            INSERT INTO coffee_beans_sales (date, customer_id, city, category, product, unit_price, quantity, sales_amount, used_discount, discount_amount, final_sales)
-            SELECT date, customer_id, city, category, product, unit_price, quantity, sales_amount, used_discount, discount_amount, final_sales FROM {TEMP_TABLE}
-        """
-        )
-        connection.execute(upsert_query)
-
-        trans.commit()
-        print("Operação concluída com sucesso!")
-
-except SQLAlchemyError as e:
-    print(f"Erro na operação: {e}")
-
-finally:
-    engine.dispose()
-
-# %%
-print(coffee_sales_df)
+    # Executa a função principal
+    main()
