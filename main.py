@@ -10,6 +10,7 @@ Fluxo:
 6. Fecha a conexão com o banco.
 """
 
+import pandas as pd
 from sqlalchemy.exc import SQLAlchemyError
 from modules.data_processing import load_data
 from modules.database import (
@@ -17,6 +18,7 @@ from modules.database import (
     upsert_data,
     create_engine_connection,
     create_temp_table,
+    create_psycopg_conn,
 )
 
 
@@ -32,7 +34,7 @@ def main():
     temp_table_name = "temp_coffee_beans_sales"
 
     # Carrega e processa os dados
-    df = load_data(file_path)
+    coffee_sales_df = load_data(file_path)
 
     # Cria a conexão com o banco
     engine = create_engine_connection()
@@ -41,19 +43,19 @@ def main():
         with engine.connect() as connection:
 
             # Inicia a transação
-            trans = connection.begin()
+            transaction = connection.begin()
 
             # Cria a tabela temporária
             create_temp_table(connection, temp_table_name)
 
             # Insere os dados na tabela temporária
-            insert_data(connection, df, temp_table_name)
+            insert_data(connection, coffee_sales_df, temp_table_name)
 
             # Faz o upsert dos dados na tabela final
             upsert_data(connection, temp_table_name)
 
             # Confirma a transação
-            trans.commit()
+            transaction.commit()
 
             print("Operação concluída com sucesso!")
 
@@ -67,7 +69,11 @@ def main():
         engine.dispose()
 
         # Exibe informações sobre o DataFrame processado
-        print(df.info())
+        print(coffee_sales_df.info())
+
+    connection = create_psycopg_conn()
+    coffee_sales_db = pd.read_sql("SELECT * FROM coffee_beans_sales", connection)
+    print(coffee_sales_db.head())
 
 
 if __name__ == "__main__":
